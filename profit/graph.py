@@ -54,7 +54,7 @@ class Graph(Observer):
         # 1. Node filtering
         S = S_node if S_node else node_significance(log)
         S_norm = dict_normalization(S, nested=False)
-        activities = [a for a in S_norm if S_norm[a] >= (1-activity_rate/100)]
+        activities = [a for a in S_norm if S_norm[a] >= (1 - activity_rate / 100)]
         
         # 2. Edge filtering
         T = T if type(T)==dict else transit_matrix(log, T.T)
@@ -74,7 +74,7 @@ class Graph(Observer):
         S_in_norm = dict_normalization(S_in, nested=True)
         S_loop_norm = dict_normalization(S_loop)
         # Early algorithm stop
-        if (path_rate == 100):
+        if path_rate == 100:
             transitions = [(a_i, a_j) for a_i in T for a_j in T[a_i] \
                            if (a_i in activities + ['start', 'end']) \
                            & (a_j in activities + ['start', 'end'])]
@@ -85,18 +85,18 @@ class Graph(Observer):
             transitions = edge_filtering(S_out_norm, transitions, co=co, type_='out')
             for a_i in S_loop_norm:
                 if (S_loop_norm[a_i] - 0.01 >= co) | (co == 0):
-                    transitions.append((a_i,a_i))
-            
+                    transitions.append((a_i, a_i))
+        
         # 3. Check graph connectivity
         I = incidence_matrix(transitions) # Filtered incidence matrix
         check_feasibility(activities, transitions, T, I, S_norm, S_out_norm)
         
-        activitiesDict = {a: (sum([v[0] for v in T[a].values()]), \
-                          int(S[a] * len(log.cases))) for a in activities}
+        activitiesDict = {a: (sum([v[0] for v in T[a].values()]),
+                              int(S[a] * len(log.cases))) for a in activities}
         transitionsDict = dict()
         for t in transitions:
             try: transitionsDict[tuple(t)] = T[t[0]][t[1]]
-            except: transitionsDict[tuple(t)] = (0,0) # "imaginary" edges
+            except: transitionsDict[tuple(t)] = (0, 0)  # "imaginary" edges
         
         self.nodes = activitiesDict
         self.edges = transitionsDict
@@ -127,7 +127,7 @@ class Graph(Observer):
         Log
         TransitionMatrix
         """
-        transitions_cnt = len([1 for i in log.flat_log \
+        transitions_cnt = len([1 for i in log.flat_log
                                  for j in log.flat_log[i]]) \
                           + len(log.flat_log.keys())
         ADS = ADS_matrix(log, T.T)
@@ -143,9 +143,8 @@ class Graph(Observer):
             self.update(log, theta1, theta2, T)
             n, m = len(self.nodes)+2, len(self.edges)
             losses = self.fitness(log, T.T, ADS)
-            # print(losses)
             # Calculate average degree
-            compl = m/n
+            compl = m / n
             # # # Calculate entropy
             # x_0 = m/(n*n)
             # x_1 = 1 - x_0
@@ -159,13 +158,13 @@ class Graph(Observer):
             # nodes = {v for e in edges for v in e}
             # compl = len(edges)/(len(nodes)*(len(nodes)-1))
             
-            return (losses,compl)
+            return losses, compl
         
         Q_val = dict() 
         per_done = 0
         if type(step) in [int, float]:
-            per_step = 100 / (100//step + 1)**2
-            grid = range(0,101,step)
+            per_step = 100 / (100 // step + 1) ** 2
+            grid = range(0, 101, step)
         else: 
             per_step = 100 / len(step)
             grid = step
@@ -181,15 +180,15 @@ class Graph(Observer):
         max_loss = Q(0, 0, lambd)[0]
         max_compl = Q(100, 100, lambd)[1]
         for theta in Q_val:
-            Q_val[theta] = (1 - lambd) * Q_val[theta][0] / max_loss + lambd * Q_val[theta][1] / max_compl
+            Q_val[theta] = (1 - lambd) * Q_val[theta][0] / max_loss + \
+                           lambd * Q_val[theta][1] / max_compl
         Q_opt = min(Q_val, key=lambda theta: Q_val[theta])
         self.update(log, Q_opt[0], Q_opt[1], T)
 
         return {'activities': Q_opt[0], 'paths': Q_opt[1]}
 
-    def aggregate(self, log, activity_rate, path_rate,
-                    agg_type='outer', heuristic='all',
-                    pre_traverse=False, ordered=False):
+    def aggregate(self, log, activity_rate, path_rate, agg_type='outer',
+                  heuristic='all', pre_traverse=False, ordered=False, cycle_rel=0.5):
         """Aggregate cycle nodes into meta state, if it is 
         significant one. Note: the log is not changed.
 
@@ -199,7 +198,7 @@ class Graph(Observer):
         reconstruct_log
         redirect_edges
         """
-        SC = self.find_states(log, pre_traverse, ordered)
+        SC = self.find_states(log, pre_traverse, ordered, cycle_rel)
         log_agg = Log()
         log_agg.flat_log = reconstruct_log(log, SC, ordered)
         log_agg.activities = log.activities.union(set(SC))
@@ -222,163 +221,144 @@ class Graph(Observer):
         else:
             self.update(log_agg, activity_rate, path_rate, T)
 
-    def cycles_search(self, pre_traverse=False):
-        """Perform DFS for cycles search in a graph (process model).
-        Return list of cycles found in the graph.
+    def find_nodes_order(self):
+        """Perform traverse of a process model from start node.
+        Return list of nodes ordered by their closeness to start.
         """
         G = incidence_matrix(self.edges)
-        nodes =  ['start', 'end'] + list(self.nodes)
-        cycles = []
-        stack = []
-        res = []
-        
+        nodes = ['start', 'end'] + list(self.nodes)
+        ordered_nodes = []
         visited = dict.fromkeys(nodes, False)
+
         def preorder_traversal(start_node):
-            """Define the order of nodes traverse starting
+            """ Define the order of nodes traverse starting
             from the initial node ('start') of a process model.
             """
             visited[start_node] = True
-            res.append(start_node)
+            ordered_nodes.append(start_node)
             try: successors = G[start_node]
             except: successors = []
             for successor in successors:
                 if not visited[successor]:
                     preorder_traversal(successor)
-        
-        if pre_traverse:
-            preorder_traversal('start')
-            nodes = res
-        
-        def DFS(start, node):
-            visited[node] = True
-            stack.append(node)
-            
-            try: successors = G[node]
-            except: successors = []
-            
-            for successor in successors:
-                if marked[successor] == True:
-                    G[successor] = dict()
-                elif visited[successor] == False:
-                    DFS(start, successor)
-                elif successor == start:
-                    cycles.append(tuple(stack))
-            
-            stack.pop()
-            visited[node] = False
-        
-        marked = dict.fromkeys(nodes, False)
-        for v in nodes:
-            visited = dict.fromkeys(nodes, False)
-            DFS(v, v)
-            marked[v] = True
-        
-        return cycles
 
-    def cycles_replay(self, log, cycles=[], ordered=False):
-        """Replay log and count occurrences of cycles found
-        in the process model.
-        
+        preorder_traversal('start')
+        return ordered_nodes
+
+    def find_cycles(self, log, pre_traverse=False, ordered=False):
+        """Search cycles in log and count their occurrences.
+
         Parameters
         ----------
         log: Log
             Ordered records of events to replay
-        cycles: list
-            List of cycles to count occurrences via log replay
+        pre_traverse: bool
+            If True, performs graph traversal from 'start' node to define
+            the order of activities in the cycles (default False)
         ordered: bool
-            If True, the order of cycle activities is fixed
-            strictly (default False)
-        
+            If True, the order of cycle activities is fixed strictly (default False)
         Returns
         =======
-        dict: with cycle (tuple) as a key and its occurrence 
+        dict: with cycle (tuple) as a key and its occurrence
             frequency in the log as a value
-        
-        See Also
-        --------
-        cycles_search
         """
-        if not cycles:
-            cycles = self.cycles_search()
-        cycles.sort(key=len, reverse=True)
-        cycle_count = {c : [0,0] for c in cycles}
-        cycles_seq = {c: [c[i:len(c)]+c[0:i] for i in range(len(c))] \
-                                             for c in cycles}
-        to_add = {c: False for c in cycles}
-        
-        for case in log.flat_log:
-            case_log = log.flat_log[case]
-            i = 0
-            while i < len(case_log):
-                for c in cycles:
-                    try: tmp = case_log[i:i+len(c)]
-                    except: continue
-                    if ordered:
-                        cond = (tmp == c)
-                    else: cond = (tmp in cycles_seq[c])
-                    if cond:
-                        cycle_count[c][0] += 1
-                        i += len(c) - 1
-                        to_add[c] = True
-                        break
-                i += 1
-            for c in cycles:
-                if to_add[c]:
-                    cycle_count[c][1] += 1
-                    to_add[c] = False
-        
-        return cycle_count
+        def check_edges(bad_edges_inds, s_ind, f_ind):
+            for ind in bad_edges_inds:
+                if ind >= f_ind:
+                    return True
+                elif s_ind <= ind:
+                    return False
+            return True
 
-    def find_states(self, log, ordered=False, pre_traverse=False):
+        cycles = dict()
+        for case_log in log.flat_log.values():
+            bad_edges = [i for i, e in enumerate(zip(case_log, case_log[1:]))
+                         if e not in self.edges]
+
+            case_cycles = set()
+            for node in self.nodes:
+                case_indices = [i for i, e in enumerate(case_log) if e == node]
+
+                for s_i, f_i in zip(case_indices, case_indices[1:]):
+                    cycle = case_log[s_i:f_i]
+
+                    if f_i - s_i == len(set(cycle)) and check_edges(bad_edges, s_i, f_i):
+
+                        if cycle not in cycles:
+                            cycles[cycle] = [1, 0]
+                        else:
+                            cycles[cycle][0] += 1
+
+                        if cycle not in case_cycles:
+                            cycles[cycle][1] += 1
+                            case_cycles.add(cycle)
+
+        if pre_traverse:
+            ordered_nodes = self.find_nodes_order()
+
+        if not ordered:
+            sum_cycles = dict()
+            left = set()
+            for cycle in cycles:
+                if cycle not in left:
+                    cycle_seq = [cycle[i:len(cycle)] + cycle[0:i]
+                                 for i in range(len(cycle))]
+                    if pre_traverse:
+                        cycle_seq = {c: ordered_nodes.index(c[0]) for c in cycle_seq}
+                        cycle = min(cycle_seq, key=cycle_seq.get)
+
+                    sum_cycles[cycle] = [sum(cycles[c][i] for c in cycle_seq if c in cycles)
+                                         for i in range(2)]
+                    for c in cycle_seq:
+                        left.add(c)
+
+            cycles = sum_cycles
+
+        return cycles
+
+    def find_states(self, log, pre_traverse=False, ordered=False, cycle_rel=0.5):
         """Define meta states, i.e. significant cycles, in the model.
         A cycle found in the model is significant, if it occurs more
-        than in a half of cases in the log.
+        than in cycle_rel of cases in the log.
         
         Parameters
         ----------
         log: Log
             Ordered records of events to replay
-        ordered: bool
-            If True, the order of cycle activities is fixed
-            strictly (default False)
         pre_traverse: bool
-            If True, performs graph traversal from 'start' node
-            to define the order of activities in the cycles
-            (default False)
-
+            If True, performs graph traversal from 'start' node to define
+            the order of activities in the cycles (default False)
+        ordered: bool
+            If True, the order of cycle activities is fixed strictly (default False)
+        cycle_rel: float
+            Significance level for meta states (default 0.5)
         Returns
         =======
         list: of significant cycles (meta states)
 
         See also
         --------
-        cycles_search
-        cycles_replay
+        find_cycles
         """
+        cycles = self.find_cycles(log, pre_traverse, ordered)
+
         case_cnt = len(log.cases)
-        cycles = self.cycles_search(pre_traverse)
-        cycles = self.cycles_replay(log, cycles, ordered)
-        SC = [] # significant cycles
-        # Filtration
-        for c in cycles:
-            if len(c) == 1: continue
-            if (cycles[c][1] / case_cnt >= 0.5):
-                SC.append(c)
-        return SC
+        return [c for c, (abs_freq, case_freq) in cycles.items()
+                if len(c) > 1 and case_freq / case_cnt >= cycle_rel]
 
     def fitness(self, log, T=None, ADS=None):
         """Return the value of a cost function that includes
         only loss term.
         """
-        if T == None:
+        if T is None:
             TM = TransitionMatrix()
             TM.update(log)
             T = TM.T
-        if ADS == None:
+        if ADS is None:
             ADS = ADS_matrix(log, T)
         
         case_cnt = len(log.cases)
-        eps = 10**(-len(str(case_cnt)))
+        eps = 10 ** (-len(str(case_cnt)))
 
         def loss(a_i, a_j):
             """Perform the loss function for log replay.
@@ -398,6 +378,7 @@ class Graph(Observer):
             else:
                 loss = eps
             return loss
+
         edges = self.edges
         edges1 = []
         for e in edges:
@@ -405,32 +386,30 @@ class Graph(Observer):
                 for e_i in e[0]:
                     for e_j in e[1]:
                         edges1.append((e_i,e_j))
-                edges1 += [(e[0][i],e[0][i+1]) for i in range(len(e[0])-1)]
-                edges1 += [(e[1][i],e[1][i+1]) for i in range(len(e[1])-1)]
-                edges1 += [(e[0][-1],e[0][0]), (e[1][-1],e[1][0])]
-            elif (type(e[0]) == tuple):
+                edges1 += [(e[0][i], e[0][i+1]) for i in range(len(e[0]) - 1)]
+                edges1 += [(e[1][i], e[1][i+1]) for i in range(len(e[1]) - 1)]
+                edges1 += [(e[0][-1], e[0][0]), (e[1][-1], e[1][0])]
+            elif type(e[0]) == tuple:
                 for e_i in e[0]:
                     edges1.append((e_i,e[1]))
-                edges1 += [(e[0][i],e[0][i+1]) for i in range(len(e[0])-1)]
-                edges1 += [(e[0][-1],e[0][0])]
-            elif (type(e[1]) == tuple):
+                edges1 += [(e[0][i], e[0][i+1]) for i in range(len(e[0]) - 1)]
+                edges1 += [(e[0][-1], e[0][0])]
+            elif type(e[1]) == tuple:
                 for e_j in e[1]:
-                    edges1.append((e[0],e_j))
-                edges1 += [(e[1][i],e[1][i+1]) for i in range(len(e[1])-1)]
-                edges1 += [(e[1][-1],e[1][0])]
+                    edges1.append((e[0], e_j))
+                edges1 += [(e[1][i], e[1][i+1]) for i in range(len(e[1]) - 1)]
+                edges1 += [(e[1][-1], e[1][0])]
             else:
                 edges1.append(e)
         edges1 = set(edges1)
 
         losses = 0
-        for trace in log.flat_log:
-            losses += loss('start', log.flat_log[trace][0])
-            for i in range(len(log.flat_log[trace])-1):
-                a_i = log.flat_log[trace][i]
-                a_j = log.flat_log[trace][i+1]
-                if (a_i,a_j) not in edges1:
+        for log_trace in log.flat_log.values():
+            losses += loss('start', log_trace[0])
+            for a_i, a_j in zip(log_trace, log_trace[1:]):
+                if (a_i, a_j) not in edges1:
                     losses += loss(a_i, a_j)
-            losses += loss(log.flat_log[trace][-1], 'end')
+            losses += loss(log_trace[-1], 'end')
         for edge in edges1:
             losses += loss(edge[0], edge[1])
         return losses
